@@ -41,7 +41,6 @@ jobs:
           import requests
           import urllib3
 
-          # تعطيل تحذيرات الشهادات غير الآمنة بسبب إيقاف التحقق
           urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
           INSTAGRAM_URL = os.getenv('INSTAGRAM_URL')
@@ -84,19 +83,19 @@ jobs:
               caption = (post.caption or f"Video: {shortcode}")[:280].replace('"', '\\"').replace('\n', ' ')
               print(f"✅ تم التحميل: {video_path}")
 
-              print("📤 جاري الرفع إلى TmpFiles...")
+              print("📤 جاري الرفع إلى file.io...")
               with open(video_path, 'rb') as f:
-                  resp = requests.post("https://tmpfiles.org/api/v1/upload", files={"file": f}, verify=False)
+                  # الرفع إلى file.io مع تحديد مدة الصلاحية لـ 1 يوم ليتمكن Buffer من سحبه براحته
+                  resp = requests.post("https://file.io/?expires=1d", files={"file": f}, verify=False)
               
               if resp.status_code != 200:
-                  raise Exception(f"فشل الرفع لـ TmpFiles: {resp.status_code}")
+                  raise Exception(f"فشل الرفع لـ file.io: {resp.status_code}")
               
               res_data = resp.json()
-              if "data" in res_data and "url" in res_data["data"]:
-                  # تحويل الرابط العادي لرابط مباشر متوافق مع Buffer
-                  public_url = res_data["data"]["url"].replace("https://tmpfiles.org/", "https://tmpfiles.org/dl/")
+              if res_data.get("success") and "link" in res_data:
+                  public_url = res_data["link"]
               else:
-                  raise Exception("فشل استخراج رابط التحميل من التجاوب")
+                  raise Exception("فشل استخراج رابط التحميل من تجاوب file.io")
                   
               print(f"✅ الرابط المباشر: {public_url}")
 
@@ -114,7 +113,7 @@ jobs:
                   elif "message" in post_data:
                       raise Exception(f"خطأ Buffer: {post_data['message']}")
               else:
-                  raise Exception(f"HTTP Error: {buf_resp.status_code}")
+                  raise Exception(f"HTTP Error: {buf_resp.status_code}\nResponse: {buf_resp.text}")
 
           except Exception as e:
               err_msg = str(e)
