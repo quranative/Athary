@@ -68,39 +68,49 @@ jobs:
 
               print(f"🔍 جاري جلب: {shortcode}")
 
-              L = instaloader.Instaloader(download_pictures=False, download_videos=True, download_video_thumbnails=False, download_comments=False, save_metadata=False, dirname_pattern="./dl", filename_pattern="{shortcode}")
+              # التحميل مباشرة في المجلد الرئيسي الحالي (./)
+              L = instaloader.Instaloader(download_pictures=False, download_videos=True, download_video_thumbnails=False, download_comments=False, save_metadata=False, dirname_pattern="./", filename_pattern="{shortcode}")
               post = instaloader.Post.from_shortcode(L.context, shortcode)
               
               if not post.is_video:
                   raise Exception("المنشور ليس فيديو")
 
-              L.download_post(post, target="./dl")
+              L.download_post(post, target="./")
               
-              files = [f for f in glob.glob("./dl/*") if f.endswith('.mp4')]
-              if not files: raise Exception("فشل التحميل")
+              files = [f for f in glob.glob("./*") if f.endswith('.mp4')]
+              if not files: raise Exception("فشل التحميل محلياً")
               
               video_path = files[0]
               caption = (post.caption or f"Video: {shortcode}")[:280].replace('"', '\\"').replace('\n', ' ')
-              print(f"✅ تم التحميل: {video_path}")
+              print(f"✅ تم الحفظ مؤقتاً في الـ root: {video_path}")
 
-              print("📤 جاري الرفع إلى file.io...")
+              # تهيئة عملية الرفع في Buffer
+              print("📤 جاري تهيئة الرفع المباشر في Buffer...")
+              init_url = "https://api.buffer.com/v1/media/uploads.json"
+              init_headers = {"Authorization": f"Bearer {BUFFER_TOKEN}"}
+              init_data = {"media_type": "video"}
+              
+              init_resp = requests.post(init_url, headers=init_headers, data=init_data, verify=False)
+              if init_resp.status_code != 200:
+                  raise Exception(f"فشل تهيئة الرفع: {init_resp.text}")
+              
+              upload_details = init_resp.json()
+              upload_url = upload_details["upload"]["url"]
+              aws_fields = upload_details["upload"]["fields"]
+              buffer_media_id = upload_details["id"]
+
+              # رفع الملف المحلي من الـ root مباشرة إلى خوادم Buffer التخزينية
+              print("🚀 جاري رفع الملف المحلي إلى خوادم Buffer...")
               with open(video_path, 'rb') as f:
-                  # الرفع إلى file.io مع تحديد مدة الصلاحية لـ 1 يوم ليتمكن Buffer من سحبه براحته
-                  resp = requests.post("https://file.io/?expires=1d", files={"file": f}, verify=False)
+                  files_payload = {'file': f}
+                  aws_resp = requests.post(upload_url, data=aws_fields, files=files_payload, verify=False)
               
-              if resp.status_code != 200:
-                  raise Exception(f"فشل الرفع لـ file.io: {resp.status_code}")
-              
-              res_data = resp.json()
-              if res_data.get("success") and "link" in res_data:
-                  public_url = res_data["link"]
-              else:
-                  raise Exception("فشل استخراج رابط التحميل من تجاوب file.io")
-                  
-              print(f"✅ الرابط المباشر: {public_url}")
+              if aws_resp.status_code not in [200, 201, 204]:
+                  raise Exception(f"فشل إرسال الملف المحلي: {aws_resp.text}")
 
+              # إتمام عملية النشر داخل المحتوى عبر الـ mediaId المولد
               print("🚀 جاري النشر على Buffer...")
-              query = f'{{"query": "mutation {{ createPost(input: {{ text: \"{caption}\", channelId: \"{BUFFER_CHANNEL_ID}\", schedulingType: automatic, mode: addToQueue, assets: {{ video: {{ url: \"{public_url}\" }} }} }}) {{ ... on PostActionSuccess {{ post {{ id }} }} ... on MutationError {{ message }} }} }}"}}'
+              query = f'{{"query": "mutation {{ createPost(input: {{ text: \"{caption}\", channelId: \"{BUFFER_CHANNEL_ID}\", schedulingType: automatic, mode: addToQueue, assets: {{ video: {{ mediaId: \"{buffer_media_id}\" }} }} }}) {{ ... on PostActionSuccess {{ post {{ id }} }} ... on MutationError {{ message }} }} }}"}}'
               buf_resp = requests.post("https://api.buffer.com/v1/graphql", json={"query": query}, headers={"Authorization": f"Bearer {BUFFER_TOKEN}", "Content-Type": "application/json"}, verify=False)
               
               buf_data = buf_resp.json()
@@ -108,8 +118,8 @@ jobs:
                   post_data = buf_data["data"]["createPost"]
                   if "post" in post_data:
                       post_id = post_data["post"]["id"]
-                      send_telegram(f"✅ **تم بنجاح!**\n🎥 تم نشر الفيديو على Buffer.\n🆔 ID: `{post_id}`")
-                      print("✅ تم النشر")
+                      send_telegram(f"✅ **تم بنجاح!**\n🎥 تم رفع ونشر الفيديو محلياً على Buffer.\n🆔 ID: `{post_id}`")
+                      print("✅ تم النشر بنجاح")
                   elif "message" in post_data:
                       raise Exception(f"خطأ Buffer: {post_data['message']}")
               else:
