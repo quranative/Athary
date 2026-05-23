@@ -1,4 +1,4 @@
-name: Instagram to Buffer (Public Repo)
+name: Instagram to Buffer (Public Repo with Arabic Caption)
 
 on:
   workflow_dispatch:
@@ -37,6 +37,7 @@ jobs:
         run: pip install instaloader requests
 
       - name: Download from Instagram
+        id: instagram_download
         run: |
           python << 'PYTHON_SCRIPT'
           import os
@@ -71,6 +72,15 @@ jobs:
               if not files: raise Exception("فشل التحميل إلى مجلد videos")
               
               print(f"✅ تم الحفظ في المجلد المحلي: {files[0]}")
+              
+              # جلب الوصف العربي وتنظيفه وتجهيزه للنشر
+              caption = post.caption if post.caption else "فيديو من انستغرام"
+              # تنظيف النص من السطور الجديدة والرموز التعبيرية المعقدة لسلامة الـ JSON
+              clean_caption = caption.replace('"', '\\"').replace('\n', ' ')
+              
+              # حفظ العنوان في ملف مخرجات الخطوة لتمريره للخطوات التالية
+              with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+                  f.write(f"video_caption={clean_caption}\n")
 
           except Exception as e:
               print(f"❌ خطأ: {str(e)}")
@@ -99,6 +109,7 @@ jobs:
 
           CHAT_ID = os.getenv('CHAT_ID')
           MSG_ID = os.getenv('MSG_ID')
+          VIDEO_CAPTION = os.getenv('VIDEO_CAPTION')
           BOT_TOKEN = "8769565075:AAEOC6vXy7XgXJ-G5kn5V5PxPTC4EWlBfo8"
           BUFFER_TOKEN = "MnPkbBRZulID113ZBbcU1FaOSRRKckgvUJAKT3uqMfg"
           BUFFER_CHANNEL_ID = "6a11e7f5090476fb99512e90"
@@ -117,14 +128,15 @@ jobs:
               filename = os.path.basename(files[0])
               encoded_filename = urllib.parse.quote(filename)
               
-              # رابط علني ومباشر بعد جعل المستودع عاماً
               public_url = f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/main/videos/{encoded_filename}"
               print(f"✅ الرابط العلني المستخدم: {public_url}")
               
               print("⏳ جاري الانتظار لمدة 20 ثانية لتحديث الكاش...")
               time.sleep(20)
 
-              caption = f"Video: {filename.split('.')[0]}"
+              # استخدام العنوان المستخرج الحقيقي، وإن كان فارغاً نقتطع أول 100 حرف من النص
+              caption = VIDEO_CAPTION if VIDEO_CAPTION else "فيديو جديد"
+              print(f"📝 العنوان المستخدم للنشر: {caption}")
               
               print("🚀 جاري النشر على Buffer...")
               query = f'mutation CreatePost {{ createPost(input: {{ text: "{caption}", channelId: "{BUFFER_CHANNEL_ID}", schedulingType: automatic, mode: addToQueue, assets: {{ video: {{ url: "{public_url}" }} }} }}) {{ ... on PostActionSuccess {{ post {{ id text }} }} ... on MutationError {{ message }} }} }}'
@@ -143,7 +155,7 @@ jobs:
                   create_post_data = buf_data["data"]["createPost"]
                   if create_post_data and "post" in create_post_data and create_post_data["post"]:
                       post_id = create_post_data["post"]["id"]
-                      send_telegram(f"✅ **تم بنجاح!**\n🎥 تم نشر الفيديو على Buffer علنياً.\n🆔 ID: `{post_id}`")
+                      send_telegram(f"✅ **تم بنجاح!**\n🎥 تم نشر الفيديو على Buffer بالعنوان العربي الصحيح.\n🆔 ID: `{post_id}`")
                       print("✅ تم النشر بنجاح!")
                   elif create_post_data and "message" in create_post_data:
                       raise Exception(f"خطأ Buffer: {create_post_data['message']}")
@@ -161,3 +173,5 @@ jobs:
         env:
           CHAT_ID: ${{ github.event.inputs.chat_id }}
           MSG_ID: ${{ github.event.inputs.message_id }}
+          VIDEO_CAPTION: ${{ steps.instagram_download.outputs.video_caption }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
