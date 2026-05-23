@@ -82,7 +82,7 @@ jobs:
 
               print("📤 جاري الرفع إلى Catbox...")
               with open(video_path, 'rb') as f:
-                  resp = requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": f})
+                  resp = requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": (os.path.basename(video_path), f, "video/mp4")})
               public_url = resp.text.strip()
               if not public_url.startswith("https://"): 
                   raise Exception(f"فشل الرفع لـ Catbox: {public_url}")
