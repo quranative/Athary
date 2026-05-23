@@ -23,7 +23,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }} # صلاحية الكتابة للمستودع
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -33,30 +33,15 @@ jobs:
       - name: Install Deps
         run: pip install instaloader requests
 
-      - name: Run Script
+      - name: Download from Instagram
         run: |
           python << 'PYTHON_SCRIPT'
           import os
           import sys
           import instaloader
           import glob
-          import requests
-          import urllib3
-
-          urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
           INSTAGRAM_URL = os.getenv('INSTAGRAM_URL')
-          CHAT_ID = os.getenv('CHAT_ID')
-          MSG_ID = os.getenv('MSG_ID')
-          BOT_TOKEN = "8769565075:AAEOC6vXy7XgXJ-G5kn5V5PxPTC4EWlBfo8"
-          BUFFER_TOKEN = "MnPkbBRZulID113ZBbcU1FaOSRRKckgvUJAKT3uqMfg"
-          BUFFER_CHANNEL_ID = "6a11e7f5090476fb99512e90"
-
-          def send_telegram(text):
-              url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-              data = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown", "reply_to_message_id": int(MSG_ID) if MSG_ID != "0" else None}
-              if MSG_ID != "0":
-                  requests.post(url, json=data, verify=False)
 
           try:
               shortcode = None
@@ -70,10 +55,7 @@ jobs:
 
               print(f"🔍 جاري جلب: {shortcode}")
 
-              # إنشاء مجلد videos محلياً إن لم يكن موجوداً
               os.makedirs("./videos", exist_ok=True)
-
-              # التحميل مباشرة داخل مجلد videos
               L = instaloader.Instaloader(download_pictures=False, download_videos=True, download_video_thumbnails=False, download_comments=False, save_metadata=False, dirname_pattern="./videos", filename_pattern="{shortcode}")
               post = instaloader.Post.from_shortcode(L.context, shortcode)
               
@@ -85,48 +67,85 @@ jobs:
               files = [f for f in glob.glob("./videos/*") if f.endswith('.mp4')]
               if not files: raise Exception("فشل التحميل إلى مجلد videos")
               
-              video_path = files[0]
-              caption = (post.caption or f"Video: {shortcode}")[:280].replace('"', '\\"').replace('\n', ' ')
-              print(f"✅ تم الحفظ في المجلد المحلي: {video_path}")
+              print(f"✅ تم الحفظ في المجلد المحلي: {files[0]}")
 
-              print("📤 جاري تهيئة الرفع المباشر في Buffer...")
-              init_url = "https://api.buffer.com/v1/media/uploads.json"
-              init_headers = {
-                  "Authorization": f"Bearer {BUFFER_TOKEN}",
-                  "Content-Type": "application/json"
-              }
-              init_data = {"media_type": "video"}
-              
-              init_resp = requests.post(init_url, headers=init_headers, json=init_data, verify=False)
-              if init_resp.status_code != 200:
-                  raise Exception(f"فشل تهيئة الرفع: {init_resp.text}")
-              
-              upload_details = init_resp.json()
-              upload_url = upload_details["upload"]["url"]
-              aws_fields = upload_details["upload"]["fields"]
-              buffer_media_id = upload_details["id"]
+          except Exception as e:
+              print(f"❌ خطأ: {str(e)}")
+              sys.exit(1)
+          PYTHON_SCRIPT
+        env:
+          INSTAGRAM_URL: ${{ github.event.inputs.instagram_url }}
 
-              print("🚀 جاري رفع الملف المحلي إلى خوادم Buffer...")
-              with open(video_path, 'rb') as f:
-                  files_payload = {'file': (os.path.basename(video_path), f, 'video/mp4')}
-                  aws_resp = requests.post(upload_url, data=aws_fields, files=files_payload, verify=False)
-              
-              if aws_resp.status_code not in [200, 201, 204]:
-                  raise Exception(f"فشل إرسال الملف المحلي: {aws_resp.text}")
+      - name: Commit and Push to GitHub
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add videos/*.mp4
+          git commit -m "Save video to repository [skip ci]" || echo "No changes to commit"
+          git push
 
+      - name: Send to Buffer and Telegram
+        run: |
+          python << 'PYTHON_SCRIPT'
+          import os
+          import sys
+          import glob
+          import requests
+          import urllib.parse
+
+          CHAT_ID = os.getenv('CHAT_ID')
+          MSG_ID = os.getenv('MSG_ID')
+          BOT_TOKEN = "8769565075:AAEOC6vXy7XgXJ-G5kn5V5PxPTC4EWlBfo8"
+          BUFFER_TOKEN = "MnPkbBRZulID113ZBbcU1FaOSRRKckgvUJAKT3uqMfg"
+          BUFFER_CHANNEL_ID = "6a11e7f5090476fb99512e90"
+          
+          # جلب معلومات المستودع الحالي ديناميكياً لتوليد رابط Raw صحيح
+          GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY') # بصيغة username/repo
+
+          def send_telegram(text):
+              url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+              data = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown", "reply_to_message_id": int(MSG_ID) if MSG_ID != "0" else None}
+              if MSG_ID != "0":
+                  requests.post(url, json=data)
+
+          try:
+              files = [f for f in glob.glob("./videos/*") if f.endswith('.mp4')]
+              if not files: raise Exception("لم يتم العثور على ملف الفيديو")
+              
+              filename = os.path.basename(files[0])
+              # ترميز اسم الملف لتجنب مشاكل المسافات أو الحروف الخاصة في الرابط
+              encoded_filename = urllib.parse.quote(filename)
+              
+              # توليد رابط الـ Raw المباشر من جيت هاب بعد عمل الـ Push
+              public_url = f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/main/videos/{encoded_filename}"
+              print(f"✅ رابط الـ Raw المولد: {public_url}")
+
+              caption = f"Video: {filename.split('.')[0]}"
+              
+              # إرسال الطلب المطابق تماماً لـ Curl الناجح لديك
               print("🚀 جاري النشر على Buffer...")
-              query = f'{{"query": "mutation {{ createPost(input: {{ text: \"{caption}\", channelId: \"{BUFFER_CHANNEL_ID}\", schedulingType: automatic, mode: addToQueue, assets: {{ video: {{ mediaId: \"{buffer_media_id}\" }} }} }}) {{ ... on PostActionSuccess {{ post {{ id }} }} ... on MutationError {{ message }} }} }}"}}'
-              buf_resp = requests.post("https://api.buffer.com/v1/graphql", json={"query": query}, headers={"Authorization": f"Bearer {BUFFER_TOKEN}", "Content-Type": "application/json"}, verify=False)
+              query = f'mutation CreatePost {{ createPost(input: {{ text: "{caption}", channelId: "{BUFFER_CHANNEL_ID}", schedulingType: automatic, mode: addToQueue, assets: {{ video: {{ url: "{public_url}" }} }} }}) {{ ... on PostActionSuccess {{ post {{ id text }} }} ... on MutationError {{ message }} }} }}'
+              
+              buf_resp = requests.post(
+                  "https://api.buffer.com/v1/graphql",
+                  json={"query": query},
+                  headers={
+                      "Authorization": f"Bearer {BUFFER_TOKEN}",
+                      "Content-Type": "application/json"
+                  }
+              )
               
               buf_data = buf_resp.json()
               if buf_resp.status_code == 200 and "data" in buf_data:
-                  post_data = buf_data["data"]["createPost"]
-                  if "post" in post_data:
-                      post_id = post_data["post"]["id"]
-                      send_telegram(f"✅ **تم بنجاح!**\n🎥 تم رفع ونشر الفيديو محلياً وحفظه في المستودع.\n🆔 ID: `{post_id}`")
-                      print("✅ تم النشر بنجاح")
-                  elif "message" in post_data:
-                      raise Exception(f"خطأ Buffer: {post_data['message']}")
+                  create_post_data = buf_data["data"]["createPost"]
+                  if "post" in create_post_data and create_post_data["post"]:
+                      post_id = create_post_data["post"]["id"]
+                      send_telegram(f"✅ **تم بنجاح!**\n🎥 تم حفظ الفيديو ونشره عبر جيت هاب Raw.\n🆔 ID: `{post_id}`")
+                      print("✅ تم النشر بنجاح!")
+                  elif "message" in create_post_data:
+                      raise Exception(f"خطأ Buffer: {create_post_data['message']}")
+                  else:
+                      raise Exception(f"فشل مجهول في استجابة Buffer: {buf_data}")
               else:
                   raise Exception(f"HTTP Error: {buf_resp.status_code}\nResponse: {buf_resp.text}")
 
@@ -137,14 +156,6 @@ jobs:
               sys.exit(1)
           PYTHON_SCRIPT
         env:
-          INSTAGRAM_URL: ${{ github.event.inputs.instagram_url }}
           CHAT_ID: ${{ github.event.inputs.chat_id }}
           MSG_ID: ${{ github.event.inputs.message_id }}
-
-      - name: Commit and Push Changes
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add videos/*.mp4
-          git commit -m "Save downloaded video to videos folder [skip ci]" || echo "No changes to commit"
-          git push
+          GITHUB_REPOSITORY: ${{ github.repository }}
