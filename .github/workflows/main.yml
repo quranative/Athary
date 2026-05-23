@@ -1,4 +1,4 @@
-name: Instagram to Buffer
+Name: Instagram to Buffer
 
 on:
   workflow_dispatch:
@@ -80,12 +80,15 @@ jobs:
               caption = (post.caption or f"Video: {shortcode}")[:280].replace('"', '\\"').replace('\n', ' ')
               print(f"✅ تم التحميل: {video_path}")
 
-              print("📤 جاري الرفع إلى Catbox...")
+              print("📤 جاري الرفع إلى Pixeldrain...")
               with open(video_path, 'rb') as f:
-                  resp = requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": (os.path.basename(video_path), f, "video/mp4")})
-              public_url = resp.text.strip()
-              if not public_url.startswith("https://"): 
-                  raise Exception(f"فشل الرفع لـ Catbox: {public_url}")
+                  resp = requests.post("https://pixeldrain.com/api/file", files={"file": f})
+              
+              if resp.status_code != 201:
+                  raise Exception(f"فشل الرفع لـ Pixeldrain: {resp.status_code}")
+              
+              file_id = resp.json().get("id")
+              public_url = f"https://pixeldrain.com/api/file/{file_id}"
               print(f"✅ الرابط: {public_url}")
 
               print("🚀 جاري النشر على Buffer...")
