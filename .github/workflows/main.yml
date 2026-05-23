@@ -16,6 +16,9 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: write
+
 jobs:
   process:
     runs-on: ubuntu-latest
@@ -92,6 +95,7 @@ jobs:
           import glob
           import requests
           import urllib.parse
+          import time
 
           CHAT_ID = os.getenv('CHAT_ID')
           MSG_ID = os.getenv('MSG_ID')
@@ -99,8 +103,7 @@ jobs:
           BUFFER_TOKEN = "MnPkbBRZulID113ZBbcU1FaOSRRKckgvUJAKT3uqMfg"
           BUFFER_CHANNEL_ID = "6a11e7f5090476fb99512e90"
           
-          # جلب معلومات المستودع الحالي ديناميكياً لتوليد رابط Raw صحيح
-          GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY') # بصيغة username/repo
+          GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
 
           def send_telegram(text):
               url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -113,16 +116,17 @@ jobs:
               if not files: raise Exception("لم يتم العثور على ملف الفيديو")
               
               filename = os.path.basename(files[0])
-              # ترميز اسم الملف لتجنب مشاكل المسافات أو الحروف الخاصة في الرابط
               encoded_filename = urllib.parse.quote(filename)
               
-              # توليد رابط الـ Raw المباشر من جيت هاب بعد عمل الـ Push
               public_url = f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/main/videos/{encoded_filename}"
               print(f"✅ رابط الـ Raw المولد: {public_url}")
+              
+              # الانتظار لمدة 40 ثانية لضمان تفعيل الرابط على سيرفرات جيت هاب وتجنب خطأ 404
+              print("⏳ جاري الانتظار لمدة 40 ثانية ليتفعل الرابط على سيرفرات GitHub...")
+              time.sleep(40)
 
               caption = f"Video: {filename.split('.')[0]}"
               
-              # إرسال الطلب المطابق تماماً لـ Curl الناجح لديك
               print("🚀 جاري النشر على Buffer...")
               query = f'mutation CreatePost {{ createPost(input: {{ text: "{caption}", channelId: "{BUFFER_CHANNEL_ID}", schedulingType: automatic, mode: addToQueue, assets: {{ video: {{ url: "{public_url}" }} }} }}) {{ ... on PostActionSuccess {{ post {{ id text }} }} ... on MutationError {{ message }} }} }}'
               
@@ -138,11 +142,11 @@ jobs:
               buf_data = buf_resp.json()
               if buf_resp.status_code == 200 and "data" in buf_data:
                   create_post_data = buf_data["data"]["createPost"]
-                  if "post" in create_post_data and create_post_data["post"]:
+                  if create_post_data and "post" in create_post_data and create_post_data["post"]:
                       post_id = create_post_data["post"]["id"]
                       send_telegram(f"✅ **تم بنجاح!**\n🎥 تم حفظ الفيديو ونشره عبر جيت هاب Raw.\n🆔 ID: `{post_id}`")
                       print("✅ تم النشر بنجاح!")
-                  elif "message" in create_post_data:
+                  elif create_post_data and "message" in create_post_data:
                       raise Exception(f"خطأ Buffer: {create_post_data['message']}")
                   else:
                       raise Exception(f"فشل مجهول في استجابة Buffer: {buf_data}")
