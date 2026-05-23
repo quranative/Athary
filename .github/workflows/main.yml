@@ -1,4 +1,4 @@
-name: Instagram to Buffer
+name: Instagram to Telegram
 
 on:
   workflow_dispatch:
@@ -87,79 +87,57 @@ jobs:
           git commit -m "Save video to repository [skip ci]" || echo "No changes to commit"
           git push
 
-      - name: Send to Buffer and Telegram
+      - name: Send Video to Telegram
         run: |
           python << 'PYTHON_SCRIPT'
           import os
           import sys
           import glob
           import requests
-          import urllib.parse
-          import time
 
           CHAT_ID = os.getenv('CHAT_ID')
           MSG_ID = os.getenv('MSG_ID')
           BOT_TOKEN = "8769565075:AAEOC6vXy7XgXJ-G5kn5V5PxPTC4EWlBfo8"
-          BUFFER_TOKEN = "MnPkbBRZulID113ZBbcU1FaOSRRKckgvUJAKT3uqMfg"
-          BUFFER_CHANNEL_ID = "6a11e7f5090476fb99512e90"
-          
-          GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
-
-          def send_telegram(text):
-              url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-              data = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown", "reply_to_message_id": int(MSG_ID) if MSG_ID != "0" else None}
-              if MSG_ID != "0":
-                  requests.post(url, json=data)
 
           try:
               files = [f for f in glob.glob("./videos/*") if f.endswith('.mp4')]
-              if not files: raise Exception("لم يتم العثور على ملف الفيديو")
+              if not files: raise Exception("لم يتم العثور على ملف الفيديو لإرساله")
               
-              filename = os.path.basename(files[0])
-              encoded_filename = urllib.parse.quote(filename)
+              video_path = files[0]
+              print(f"📤 جاري إرسال الفيديو إلى تلجرام: {video_path}")
               
-              public_url = f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/main/videos/{encoded_filename}"
-              print(f"✅ رابط الـ Raw المولد: {public_url}")
+              # إرسال كملف فيديو مباشر يعرض داخل المحادثة
+              url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendVideo"
               
-              # الانتظار لمدة 40 ثانية لضمان تفعيل الرابط على سيرفرات جيت هاب وتجنب خطأ 404
-              print("⏳ جاري الانتظار لمدة 40 ثانية ليتفعل الرابط على سيرفرات GitHub...")
-              time.sleep(40)
-
-              caption = f"Video: {filename.split('.')[0]}"
+              payload = {
+                  "chat_id": CHAT_ID,
+                  "reply_to_message_id": int(MSG_ID) if MSG_ID != "0" else None,
+                  "supports_streaming": True
+              }
               
-              print("🚀 جاري النشر على Buffer...")
-              query = f'mutation CreatePost {{ createPost(input: {{ text: "{caption}", channelId: "{BUFFER_CHANNEL_ID}", schedulingType: automatic, mode: addToQueue, assets: {{ video: {{ url: "{public_url}" }} }} }}) {{ ... on PostActionSuccess {{ post {{ id text }} }} ... on MutationError {{ message }} }} }}'
+              with open(video_path, 'rb') as video_file:
+                  files_payload = {'video': video_file}
+                  resp = requests.post(url, data=payload, files=files_payload)
               
-              buf_resp = requests.post(
-                  "https://api.buffer.com/v1/graphql",
-                  json={"query": query},
-                  headers={
-                      "Authorization": f"Bearer {BUFFER_TOKEN}",
-                      "Content-Type": "application/json"
-                  }
-              )
-              
-              buf_data = buf_resp.json()
-              if buf_resp.status_code == 200 and "data" in buf_data:
-                  create_post_data = buf_data["data"]["createPost"]
-                  if create_post_data and "post" in create_post_data and create_post_data["post"]:
-                      post_id = create_post_data["post"]["id"]
-                      send_telegram(f"✅ **تم بنجاح!**\n🎥 تم حفظ الفيديو ونشره عبر جيت هاب Raw.\n🆔 ID: `{post_id}`")
-                      print("✅ تم النشر بنجاح!")
-                  elif create_post_data and "message" in create_post_data:
-                      raise Exception(f"خطأ Buffer: {create_post_data['message']}")
-                  else:
-                      raise Exception(f"فشل مجهول في استجابة Buffer: {buf_data}")
+              if resp.status_code == 200:
+                  print("✅ تم إرسال الفيديو بنجاح إلى تلجرام.")
               else:
-                  raise Exception(f"HTTP Error: {buf_resp.status_code}\nResponse: {buf_resp.text}")
+                  raise Exception(f"فشل إرسال الفيديو لتلجرام: {resp.text}")
 
           except Exception as e:
               err_msg = str(e)
               print(f"❌ خطأ: {err_msg}")
-              send_telegram(f"❌ **فشل التنفيذ**\n⚠️ السبب: {err_msg}")
+              # إرسال رسالة خطأ نصية في حال فشل رفع الفيديو
+              error_url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+              error_data = {
+                  "chat_id": CHAT_ID, 
+                  "text": f"❌ **فشل إرسال الفيديو**\n⚠️ السبب: {err_msg}", 
+                  "parse_mode": "Markdown",
+                  "reply_to_message_id": int(MSG_ID) if MSG_ID != "0" else None
+              }
+              requests.post(error_url, json=error_data)
               sys.exit(1)
           PYTHON_SCRIPT
         env:
           CHAT_ID: ${{ github.event.inputs.chat_id }}
           MSG_ID: ${{ github.event.inputs.message_id }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
