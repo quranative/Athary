@@ -1,4 +1,4 @@
-name: Instagram to Buffer (GitHub Link)
+name: Instagram to Buffer (Private Repo Fix)
 
 on:
   workflow_dispatch:
@@ -87,7 +87,7 @@ jobs:
           git commit -m "Save video to repository [skip ci]" || echo "No changes to commit"
           git push
 
-      - name: Send Link to Buffer
+      - name: Send Private Link with Token to Buffer
         run: |
           python << 'PYTHON_SCRIPT'
           import os
@@ -102,6 +102,8 @@ jobs:
           BOT_TOKEN = "8769565075:AAEOC6vXy7XgXJ-G5kn5V5PxPTC4EWlBfo8"
           BUFFER_TOKEN = "MnPkbBRZulID113ZBbcU1FaOSRRKckgvUJAKT3uqMfg"
           BUFFER_CHANNEL_ID = "6a11e7f5090476fb99512e90"
+          GITHUB_TOKEN = os.getenv('GITHUB_TOKEN')
+          GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
 
           def send_telegram(text):
               url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -116,12 +118,12 @@ jobs:
               filename = os.path.basename(files[0])
               encoded_filename = urllib.parse.quote(filename)
               
-              # اعتماد الرابط الدائم والمباشر الذي طلبته بدقة
-              public_url = f"https://raw.githubusercontent.com/quranative/Athary/refs/heads/main/videos/{encoded_filename}"
-              print(f"✅ الرابط المستخدم: {public_url}")
+              # توليد رابط يتضمن توكن جيت هاب للسماح لـ Buffer بالتحميل من المستودع الخاص
+              public_url = f"https://x-token-auth:{GITHUB_TOKEN}@raw.githubusercontent.com/{GITHUB_REPOSITORY}/refs/heads/main/videos/{encoded_filename}"
+              print("✅ تم توليد رابط الوصول الآمن للمستودع الخاص.")
               
-              print("⏳ جاري الانتظار لمدة 30 ثانية للتأكد من استقرار الرابط على سيرفرات جيت هاب...")
-              time.sleep(30)
+              print("⏳ جاري الانتظار لمدة 20 ثانية...")
+              time.sleep(20)
 
               caption = f"Video: {filename.split('.')[0]}"
               
@@ -142,7 +144,7 @@ jobs:
                   create_post_data = buf_data["data"]["createPost"]
                   if create_post_data and "post" in create_post_data and create_post_data["post"]:
                       post_id = create_post_data["post"]["id"]
-                      send_telegram(f"✅ **تم بنجاح!**\n🎥 تم نشر الفيديو على Buffer عبر الرابط الدائم.\n🆔 ID: `{post_id}`")
+                      send_telegram(f"✅ **تم بنجاح!**\n🎥 تم نشر الفيديو على Buffer من مستودعك الخاص.\n🆔 ID: `{post_id}`")
                       print("✅ تم النشر بنجاح!")
                   elif create_post_data and "message" in create_post_data:
                       raise Exception(f"خطأ Buffer: {create_post_data['message']}")
@@ -160,3 +162,5 @@ jobs:
         env:
           CHAT_ID: ${{ github.event.inputs.chat_id }}
           MSG_ID: ${{ github.event.inputs.message_id }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
