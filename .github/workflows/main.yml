@@ -1,4 +1,4 @@
-name: Instagram to Buffer (Public Repo with Arabic Caption)
+name: Instagram to Buffer (Auto Clean Repository)
 
 on:
   workflow_dispatch:
@@ -44,6 +44,7 @@ jobs:
           import sys
           import instaloader
           import glob
+          import shutil
 
           INSTAGRAM_URL = os.getenv('INSTAGRAM_URL')
 
@@ -57,9 +58,13 @@ jobs:
               if not shortcode:
                   raise Exception("رابط غير صالح")
 
-              print(f"🔍 جاري جلب: {shortcode}")
+              print(f"🔍 جاري جلب المقطع الحالي: {shortcode}")
 
+              # تنظيف المجلد المحلي تماماً قبل تحميل المقطع الجديد
+              if os.path.exists("./videos"):
+                  shutil.rmtree("./videos")
               os.makedirs("./videos", exist_ok=True)
+
               L = instaloader.Instaloader(download_pictures=False, download_videos=True, download_video_thumbnails=False, download_comments=False, save_metadata=False, dirname_pattern="./videos", filename_pattern="{shortcode}")
               post = instaloader.Post.from_shortcode(L.context, shortcode)
               
@@ -68,19 +73,19 @@ jobs:
 
               L.download_post(post, target="./videos")
               
-              files = [f for f in glob.glob("./videos/*") if f.endswith('.mp4')]
-              if not files: raise Exception("فشل التحميل إلى مجلد videos")
+              target_video = f"./videos/{shortcode}.mp4"
+              if not os.path.exists(target_video):
+                  raise Exception("فشل تحميل المقطع الجديد")
               
-              print(f"✅ تم الحفظ في المجلد المحلي: {files[0]}")
+              print(f"✅ تم الحفظ بنجاح محلياً: {target_video}")
               
-              # جلب الوصف العربي وتنظيفه وتجهيزه للنشر
+              # جلب الوصف العربي وتنظيفه
               caption = post.caption if post.caption else "فيديو من انستغرام"
-              # تنظيف النص من السطور الجديدة والرموز التعبيرية المعقدة لسلامة الـ JSON
               clean_caption = caption.replace('"', '\\"').replace('\n', ' ')
               
-              # حفظ العنوان في ملف مخرجات الخطوة لتمريره للخطوات التالية
               with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
                   f.write(f"video_caption={clean_caption}\n")
+                  f.write(f"video_filename={shortcode}.mp4\n")
 
           except Exception as e:
               print(f"❌ خطأ: {str(e)}")
@@ -89,12 +94,18 @@ jobs:
         env:
           INSTAGRAM_URL: ${{ github.event.inputs.instagram_url }}
 
-      - name: Commit and Push to GitHub
+      - name: Sync, Clean, and Push to GitHub
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add videos/*.mp4
-          git commit -m "Save video to repository [skip ci]" || echo "No changes to commit"
+          
+          # مسح الفيديوهات القديمة من تتبع جيت هاب (إن وجدت) لضمان بقاء المستودع نظيفاً
+          git rm -f videos/*.mp4 || echo "No old videos to remove from git index"
+          
+          # إضافة الملف الجديد المحدث فقط
+          git add videos/${{ steps.instagram_download.outputs.video_filename }}
+          
+          git commit -m "Update repository: Keep only ${{ steps.instagram_download.outputs.video_filename }} [skip ci]" || echo "No changes to commit"
           git push
 
       - name: Send Public Link to Buffer
@@ -102,7 +113,6 @@ jobs:
           python << 'PYTHON_SCRIPT'
           import os
           import sys
-          import glob
           import requests
           import urllib.parse
           import time
@@ -110,6 +120,7 @@ jobs:
           CHAT_ID = os.getenv('CHAT_ID')
           MSG_ID = os.getenv('MSG_ID')
           VIDEO_CAPTION = os.getenv('VIDEO_CAPTION')
+          VIDEO_FILENAME = os.getenv('VIDEO_FILENAME')
           BOT_TOKEN = "8769565075:AAEOC6vXy7XgXJ-G5kn5V5PxPTC4EWlBfo8"
           BUFFER_TOKEN = "MnPkbBRZulID113ZBbcU1FaOSRRKckgvUJAKT3uqMfg"
           BUFFER_CHANNEL_ID = "6a11e7f5090476fb99512e90"
@@ -122,24 +133,22 @@ jobs:
                   requests.post(url, json=data)
 
           try:
-              files = [f for f in glob.glob("./videos/*") if f.endswith('.mp4')]
-              if not files: raise Exception("لم يتم العثور على ملف الفيديو")
+              if not VIDEO_FILENAME:
+                  raise Exception("اسم الملف الجديد غير متوفر")
               
-              filename = os.path.basename(files[0])
-              encoded_filename = urllib.parse.quote(filename)
+              encoded_filename = urllib.parse.quote(VIDEO_FILENAME)
               
+              # توليد الرابط العلني والنظيف للمقطع الجديد
               public_url = f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/main/videos/{encoded_filename}"
-              print(f"✅ الرابط العلني المستخدم: {public_url}")
+              print(f"✅ الرابط المباشر للمقطع الحالي: {public_url}")
               
-              print("⏳ جاري الانتظار لمدة 20 ثانية لتحديث الكاش...")
+              print("⏳ جاري الانتظار لمدة 20 ثانية لتحديث الكاش العلني...")
               time.sleep(20)
 
-              # استخدام العنوان المستخرج الحقيقي، وإن كان فارغاً نقتطع أول 100 حرف من النص
-              caption = VIDEO_CAPTION if VIDEO_CAPTION else "فيديو جديد"
-              print(f"📝 العنوان المستخدم للنشر: {caption}")
+              print(f"📝 العنوان المستخدم للنشر: {VIDEO_CAPTION}")
               
               print("🚀 جاري النشر على Buffer...")
-              query = f'mutation CreatePost {{ createPost(input: {{ text: "{caption}", channelId: "{BUFFER_CHANNEL_ID}", schedulingType: automatic, mode: addToQueue, assets: {{ video: {{ url: "{public_url}" }} }} }}) {{ ... on PostActionSuccess {{ post {{ id text }} }} ... on MutationError {{ message }} }} }}'
+              query = f'mutation CreatePost {{ createPost(input: {{ text: "{VIDEO_CAPTION}", channelId: "{BUFFER_CHANNEL_ID}", schedulingType: automatic, mode: addToQueue, assets: {{ video: {{ url: "{public_url}" }} }} }}) {{ ... on PostActionSuccess {{ post {{ id text }} }} ... on MutationError {{ message }} }} }}'
               
               buf_resp = requests.post(
                   "https://api.buffer.com/v1/graphql",
@@ -155,7 +164,7 @@ jobs:
                   create_post_data = buf_data["data"]["createPost"]
                   if create_post_data and "post" in create_post_data and create_post_data["post"]:
                       post_id = create_post_data["post"]["id"]
-                      send_telegram(f"✅ **تم بنجاح!**\n🎥 تم نشر الفيديو على Buffer بالعنوان العربي الصحيح.\n🆔 ID: `{post_id}`")
+                      send_telegram(f"✅ **تم بنجاح!**\n🎥 تم نشر المقطع الجديد واستبدال الملفات القديمة بنجاح.")
                       print("✅ تم النشر بنجاح!")
                   elif create_post_data and "message" in create_post_data:
                       raise Exception(f"خطأ Buffer: {create_post_data['message']}")
@@ -174,4 +183,5 @@ jobs:
           CHAT_ID: ${{ github.event.inputs.chat_id }}
           MSG_ID: ${{ github.event.inputs.message_id }}
           VIDEO_CAPTION: ${{ steps.instagram_download.outputs.video_caption }}
+          VIDEO_FILENAME: ${{ steps.instagram_download.outputs.video_filename }}
           GITHUB_REPOSITORY: ${{ github.repository }}
