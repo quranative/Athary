@@ -39,6 +39,10 @@ jobs:
           import instaloader
           import glob
           import requests
+          import urllib3
+
+          # تعطيل تحذيرات الشهادات غير الآمنة بسبب إيقاف التحقق
+          urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
           INSTAGRAM_URL = os.getenv('INSTAGRAM_URL')
           CHAT_ID = os.getenv('CHAT_ID')
@@ -51,7 +55,7 @@ jobs:
               url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
               data = {"chat_id": CHAT_ID, "text": text, "parse_mode": "Markdown", "reply_to_message_id": int(MSG_ID) if MSG_ID != "0" else None}
               if MSG_ID != "0":
-                  requests.post(url, json=data)
+                  requests.post(url, json=data, verify=False)
 
           try:
               shortcode = None
@@ -80,22 +84,25 @@ jobs:
               caption = (post.caption or f"Video: {shortcode}")[:280].replace('"', '\\"').replace('\n', ' ')
               print(f"✅ تم التحميل: {video_path}")
 
-              print("📤 جاري الرفع إلى BashUpload...")
+              print("📤 جاري الرفع إلى TmpFiles...")
               with open(video_path, 'rb') as f:
-                  resp = requests.put(f"https://bashupload.com/{os.path.basename(video_path)}", data=f)
+                  resp = requests.post("https://tmpfiles.org/api/v1/upload", files={"file": f}, verify=False)
               
-              if resp.status_code not in [200, 201]:
-                  raise Exception(f"فشل الرفع لـ BashUpload: {resp.status_code}")
+              if resp.status_code != 200:
+                  raise Exception(f"فشل الرفع لـ TmpFiles: {resp.status_code}")
               
-              public_url = resp.text.strip()
-              if not public_url.startswith("https://"):
-                  raise Exception(f"رابط غير صحيح من BashUpload: {public_url}")
+              res_data = resp.json()
+              if "data" in res_data and "url" in res_data["data"]:
+                  # تحويل الرابط العادي لرابط مباشر متوافق مع Buffer
+                  public_url = res_data["data"]["url"].replace("https://tmpfiles.org/", "https://tmpfiles.org/dl/")
+              else:
+                  raise Exception("فشل استخراج رابط التحميل من التجاوب")
                   
-              print(f"✅ الرابط: {public_url}")
+              print(f"✅ الرابط المباشر: {public_url}")
 
               print("🚀 جاري النشر على Buffer...")
               query = f'{{"query": "mutation {{ createPost(input: {{ text: \"{caption}\", channelId: \"{BUFFER_CHANNEL_ID}\", schedulingType: automatic, mode: addToQueue, assets: {{ video: {{ url: \"{public_url}\" }} }} }}) {{ ... on PostActionSuccess {{ post {{ id }} }} ... on MutationError {{ message }} }} }}"}}'
-              buf_resp = requests.post("https://api.buffer.com/v1/graphql", json={"query": query}, headers={"Authorization": f"Bearer {BUFFER_TOKEN}", "Content-Type": "application/json"})
+              buf_resp = requests.post("https://api.buffer.com/v1/graphql", json={"query": query}, headers={"Authorization": f"Bearer {BUFFER_TOKEN}", "Content-Type": "application/json"}, verify=False)
               
               buf_data = buf_resp.json()
               if buf_resp.status_code == 200 and "data" in buf_data:
