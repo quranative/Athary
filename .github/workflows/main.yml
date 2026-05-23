@@ -1,4 +1,4 @@
-Name: Instagram to Buffer
+name: Instagram to Buffer
 
 on:
   workflow_dispatch:
