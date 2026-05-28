@@ -2,10 +2,8 @@ name: Scheduled Bulk Instagram to Buffer (Algeria Time)
 
 on:
   schedule:
-    # يعمل يومياً الساعة 12:00 منتصف الليل بتوقيت الجزائر (23:00 بتوقيت UTC)
     - cron: '0 23 * * *'
   workflow_dispatch:
-    # للتشغيل اليدوي في أي وقت عند الحاجة
 
 permissions:
   contents: write
@@ -34,7 +32,6 @@ jobs:
           import os
           import sys
           import instaloader
-          import glob
           import shutil
           import requests
           import urllib.parse
@@ -46,21 +43,15 @@ jobs:
           GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
 
           if not os.path.exists(TXT_FILE) or os.stat(TXT_FILE).st_size == 0:
-              print("ℹ️ ملف reels.txt فارغ أو غير موجود.")
               sys.exit(0)
 
-          # قراءة الروابط الحالية
           with open(TXT_FILE, "r", encoding="utf-8") as f:
               all_links = [line.strip() for line in f.readlines() if line.strip()]
 
           if not all_links:
-              print("ℹ️ لا توجد روابط صالحة للمعالجة.")
               sys.exit(0)
 
-          # تحديد الـ 10 روابط الأولى المستهدفة اليوم
           total_to_process = min(10, len(all_links))
-          print(f"🚀 تم العثور على {len(all_links)} رابط الكلي. جاري معالجة أول {total_to_process} روابط بالتسلسل المباشر...")
-
           L = instaloader.Instaloader(
               download_pictures=False, download_videos=True, 
               download_video_thumbnails=False, download_comments=False, 
@@ -69,50 +60,38 @@ jobs:
 
           successful_count = 0
 
-          # معالجة الروابط واحداً تلو الآخر
           for i in range(total_to_process):
-              # إعادة قراءة الملف دائماً لضمان المزامنة في حال التحديث
               with open(TXT_FILE, "r", encoding="utf-8") as f:
                   current_lines = [line.strip() for line in f.readlines() if line.strip()]
               
               if not current_lines:
                   break
                   
-              url = current_lines[0] # نأخذ الرابط الأول دائماً
-              print(f"\n--- ⏳ جاري معالجة الرابط الحالي: {url} ---")
+              url = current_lines[0]
+              
+              if i > 0:
+                  time.sleep(20)
               
               try:
-                  shortcode = None
-                  if "/reel/" in url:
-                      shortcode = url.split("/reel/")[1].split("/")[0]
-                  elif "/p/" in url:
-                      shortcode = url.split("/p/")[1].split("/")[0]
+                  shortcode = url.split("/reel/")[1].split("/")[0] if "/reel/" in url else url.split("/p/")[1].split("/")[0]
                   
-                  if not shortcode:
-                      raise Exception("الرابط غير صالح الهيكل")
-
-                  # تنظيف مجلد الفيديوهات لضمان عدم التداخل نهائياً
-                  if os.path.exists("./videos"):
+                  if os.path.exists("./videos"): 
                       shutil.rmtree("./videos")
                   os.makedirs("./videos", exist_ok=True)
-
-                  L.dirname_pattern = "./videos"
-                  L.filename_pattern = "{shortcode}"
                   
                   post = instaloader.Post.from_shortcode(L.context, shortcode)
                   if not post.is_video:
-                      raise Exception("المنشور المستهدف لا يحتوي على فيديو")
+                      raise Exception("Not a video")
 
                   L.download_post(post, target="./videos")
                   target_video = f"./videos/{shortcode}.mp4"
                   
                   if not os.path.exists(target_video):
-                      raise Exception("فشل تحميل المقطع محلياً على السيرفر")
+                      raise Exception("Download failed")
 
-                  caption = post.caption if post.caption else "فيديو من انستغرام"
+                  caption = post.caption if post.caption else "Video"
                   clean_caption = caption.replace('"', '\\"').replace('\n', ' ')
 
-                  # رفع المقطع الحالي فوراً إلى جيت هاب لتوليد الرابط المباشر لـ Buffer
                   encoded_filename = urllib.parse.quote(f"{shortcode}.mp4")
                   public_url = f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/main/videos/{encoded_filename}"
                   
@@ -120,15 +99,11 @@ jobs:
                   os.system('git config --global user.email "github-actions[bot]@users.noreply.github.com"')
                   os.system('git rm -f videos/*.mp4 >/dev/null 2>&1 || true')
                   os.system(f'git add {target_video}')
-                  os.system(f'git commit -m "Upload sequential slice: {shortcode} [skip ci]" || true')
+                  os.system(f'git commit -m "Upload: {shortcode} [skip ci]" || true')
                   os.system('git push')
 
-                  print(f"✅ تم الرفع المؤقت لجيت هاب. الرابط: {public_url}")
-                  print("⏳ جاري الانتظار 20 ثانية لاستقرار الكاش...")
-                  time.sleep(20)
+                  time.sleep(10)
 
-                  # إرسال الطلب إلى Buffer
-                  print("🚀 جاري النشر والتمرير لـ Buffer...")
                   query = f'mutation CreatePost {{ createPost(input: {{ text: "{clean_caption}", channelId: "{BUFFER_CHANNEL_ID}", schedulingType: automatic, mode: addToQueue, assets: {{ video: {{ url: "{public_url}" }} }} }}) {{ ... on PostActionSuccess {{ post {{ id }} }} ... on MutationError {{ message }} }} }}'
                   
                   buf_resp = requests.post(
@@ -141,10 +116,8 @@ jobs:
                   if buf_resp.status_code == 200 and "data" in buf_data:
                       create_post_data = buf_data["data"]["createPost"]
                       if create_post_data and "post" in create_post_data and create_post_data["post"]:
-                          print(f"✅ تم قبول المقطع {shortcode} بنجاح في قائمة Buffer.")
                           successful_count += 1
                           
-                          # بعد النجاح التام: نقوم بإزالة هذا الرابط الناجح فقط من الملف وتحديث جيت هاب
                           remaining_lines = current_lines[1:]
                           with open(TXT_FILE, "w", encoding="utf-8") as f:
                               for line in remaining_lines:
@@ -152,28 +125,25 @@ jobs:
                                   
                           os.system(f'git add {TXT_FILE}')
                           os.system('git rm -f videos/*.mp4 >/dev/null 2>&1 || true')
-                          os.system(f'git commit -m "Remove successfully processed link: {shortcode} [skip ci]" || true')
+                          os.system(f'git commit -m "Remove: {shortcode} [skip ci]" || true')
                           os.system('git push')
                       else:
-                          raise Exception(f"خطأ Buffer: {create_post_data.get('message', 'فشل غير معروف')}")
+                          raise Exception("Buffer error")
                   else:
-                      raise Exception(f"HTTP Error {buf_resp.status_code} من سيرفر Buffer")
+                      raise Exception("HTTP Error")
 
               except Exception as e:
-                  err_msg = str(e)
-                  print(f"❌ توقف السكربت بسبب خطأ عند الرابط: {url}\n⚠️ السبب: {err_msg}")
-                  sys.exit(1) # الخروج الفوري بكود خطأ لإيقاف الـ Workflow كاملاً دون مسح الرابط الفاشل
+                  sys.exit(1)
 
-          print(f"✨ اكتملت المعالجة المتسلسلة اليومية بنجاح. تم معالجة `{successful_count}` مقاطع.")
           PYTHON_SCRIPT
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
 
-      - name: Final Clean Cache
-        if: always() # لضمان تنظيف المجلد المحلي دائماً حتى لو فشل السكربت
+      - name: Final Clean
+        if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git rm -f videos/*.mp4 || echo "Clean directory"
-          git commit -m "Final workflow media cache clean [skip ci]" || echo "No changes"
+          git rm -f videos/*.mp4 || true
+          git commit -m "Cleanup [skip ci]" || true
           git push
