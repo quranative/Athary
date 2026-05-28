@@ -36,6 +36,7 @@ jobs:
           import requests
           import urllib.parse
           import time
+          import glob
 
           TXT_FILE = "reels.txt"
           BUFFER_TOKEN = "MnPkbBRZulID113ZBbcU1FaOSRRKckgvUJAKT3uqMfg"
@@ -84,21 +85,24 @@ jobs:
                       raise Exception("Not a video")
 
                   L.download_post(post, target="./videos")
-                  target_video = f"./videos/{shortcode}.mp4"
                   
-                  if not os.path.exists(target_video):
+                  video_files = glob.glob("./videos/*.mp4")
+                  if not video_files:
                       raise Exception("Download failed")
+                      
+                  target_video = video_files[0]
+                  actual_filename = os.path.basename(target_video)
 
                   caption = post.caption if post.caption else "Video"
                   clean_caption = caption.replace('"', '\\"').replace('\n', ' ')
 
-                  encoded_filename = urllib.parse.quote(f"{shortcode}.mp4")
+                  encoded_filename = urllib.parse.quote(actual_filename)
                   public_url = f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/main/videos/{encoded_filename}"
                   
                   os.system('git config --global user.name "github-actions[bot]"')
                   os.system('git config --global user.email "github-actions[bot]@users.noreply.github.com"')
                   os.system('git rm -f videos/*.mp4 >/dev/null 2>&1 || true')
-                  os.system(f'git add {target_video}')
+                  os.system(f'git add "{target_video}"')
                   os.system(f'git commit -m "Upload: {shortcode} [skip ci]" || true')
                   os.system('git push')
 
