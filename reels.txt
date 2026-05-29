@@ -14,3 +14,24 @@ https://www.instagram.com/reel/DYU09BBDpE1/?igsh=MWViMWE2NnVzbGNn
 https://www.instagram.com/reel/DX2bch_s0TA/?igsh=OXRtdXo2eDc2N2sz
 https://www.instagram.com/reel/DR2g6NYgDZy/?igsh=eXg5d3NtcTdnY2Nw
 https://www.instagram.com/reel/DUystxWAMc6/?igsh=MXFocGs3OWM5M25xbQ==
+import requests
+
+url = input("URL: ")
+
+ollama_url = "https://ollama.com/api/generate"
+headers = {
+    "Authorization": "Bearer 390b76fb236f48ebbf19b60c4781ba6e.DoRm3P8CaA2swUIPXUxH12uu"
+}
+prompt = f"Analyze this image URL: {url}\nIf the image contains a girl, reply with 'girl'. If it does not contain any girl, reply with 'no girls'. Return ONLY the answer without any extra text."
+
+payload = {
+    "model": "gpt-oss:120b-cloud",
+    "prompt": prompt,
+    "stream": False
+}
+
+try:
+    ai_response = requests.post(ollama_url, headers=headers, json=payload, timeout=15)
+    print(ai_response.json().get("response", "").strip())
+except requests.exceptions.RequestException as e:
+    print(f"Error connecting to Ollama: {e}")
