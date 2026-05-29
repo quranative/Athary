@@ -40,3 +40,4 @@ pip install pdf2image
 pip install pdf2image --break-system-packages
 sudo apt update && sudo apt install -y poppler-utils
 https://ollama.com/search
+https://ollama.com/search
