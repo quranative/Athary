@@ -42,6 +42,9 @@ jobs:
           BUFFER_TOKEN = "MnPkbBRZulID113ZBbcU1FaOSRRKckgvUJAKT3uqMfg"
           BUFFER_CHANNEL_ID = "6a11e7f5090476fb99512e90"
           GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
+          
+          IG_SESSIONID = os.getenv('IG_SESSIONID')
+          IG_CSRFTOKEN = os.getenv('IG_CSRFTOKEN')
 
           if not os.path.exists(TXT_FILE) or os.stat(TXT_FILE).st_size == 0:
               sys.exit(0)
@@ -53,11 +56,17 @@ jobs:
               sys.exit(0)
 
           total_to_process = min(10, len(all_links))
+          
           L = instaloader.Instaloader(
               download_pictures=False, download_videos=True, 
               download_video_thumbnails=False, download_comments=False, 
               save_metadata=False, dirname_pattern="./videos"
           )
+
+          if IG_SESSIONID and IG_CSRFTOKEN:
+              L.context._session.cookies.set("sessionid", IG_SESSIONID, domain=".instagram.com")
+              L.context._session.cookies.set("csrftoken", IG_CSRFTOKEN, domain=".instagram.com")
+              L.context._session.headers.update({"X-CSRFToken": IG_CSRFTOKEN})
 
           successful_count = 0
 
@@ -71,7 +80,7 @@ jobs:
               url = current_lines[0]
               
               if i > 0:
-                  time.sleep(20)
+                  time.sleep(40)
               
               try:
                   shortcode = url.split("/reel/")[1].split("/")[0] if "/reel/" in url else url.split("/p/")[1].split("/")[0]
@@ -146,6 +155,8 @@ jobs:
           PYTHON_SCRIPT
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
+          IG_SESSIONID: ${{ secrets.INSTAGRAM_SESSIONID }}
+          IG_CSRFTOKEN: ${{ secrets.INSTAGRAM_CSRFTOKEN }}
 
       - name: Final Clean
         if: always()
