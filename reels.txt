@@ -3,3 +3,31 @@ https://www.instagram.com/reel/DXzkY_3Mavx/?igsh=MW53N2x3bmFmdHo5cw==
 https://developers.facebook.com/tools/explorer/4195126980807710/
 98799773
 https://www.instagram.com/reel/DXzkY_3Mavx/?igsh=MW53N2x3bmFmdHo5cw==
+var rawResponse = local('http_data');
+if (!rawResponse) {
+    rawResponse = global('http_data');
+}
+
+var sha = "";
+var currentContent = "";
+
+if (rawResponse) {
+    var response = JSON.parse(rawResponse);
+    sha = response.sha || "";
+    if (response.content) {
+        currentContent = atob(response.content.replace(/\s/g, ''));
+    }
+}
+
+var newLink = global('CLIP') ? global('CLIP').trim() : "";
+var regex = /^https:\/\/www\.instagram\.com\/reel\/[A-Za-z0-9_-]+\/\?igsh=[A-Za-z0-9_-]+==$/;
+
+if (newLink && regex.test(newLink)) {
+    var updatedContent = (currentContent.trim() ? currentContent.trim() + "\n" : "") + newLink;
+    var base64Content = btoa(updatedContent);
+
+    setLocal('git_sha', sha);
+    setLocal('git_content', base64Content);
+} else {
+    exit();
+}
