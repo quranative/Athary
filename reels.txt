@@ -42,3 +42,4 @@ sudo apt update && sudo apt install -y poppler-utils
 https://ollama.com/search
 https://ollama.com/search
 221176
+https://ollama.com/search?page=11
