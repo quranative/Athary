@@ -2,7 +2,7 @@ name: Scheduled Bulk Instagram to Buffer (Algeria Time)
 
 on:
   schedule:
-    - cron: '0 22 * * *'
+    - cron: '0 21 * * *'
   workflow_dispatch:
 
 permissions:
@@ -76,9 +76,16 @@ jobs:
               try:
                   shortcode = url.split("/reel/")[1].split("/")[0] if "/reel/" in url else url.split("/p/")[1].split("/")[0]
                   
+                  os.system('git config --global user.name "github-actions[bot]"')
+                  os.system('git config --global user.email "github-actions[bot]@users.noreply.github.com"')
+                  
                   if os.path.exists("./videos"): 
                       shutil.rmtree("./videos")
                   os.makedirs("./videos", exist_ok=True)
+                  
+                  os.system('git rm -f videos/*.mp4 >/dev/null 2>&1 || true')
+                  os.system('git commit -m "Clean previous video cache [skip ci]" || true')
+                  os.system('git push || true')
                   
                   post = instaloader.Post.from_shortcode(L.context, shortcode)
                   if not post.is_video:
@@ -99,14 +106,11 @@ jobs:
                   encoded_filename = urllib.parse.quote(actual_filename)
                   public_url = f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/main/videos/{encoded_filename}"
                   
-                  os.system('git config --global user.name "github-actions[bot]"')
-                  os.system('git config --global user.email "github-actions[bot]@users.noreply.github.com"')
-                  os.system('git rm -f videos/*.mp4 >/dev/null 2>&1 || true')
                   os.system(f'git add "{target_video}"')
-                  os.system(f'git commit -m "Upload: {shortcode} [skip ci]" || true')
+                  os.system(f'git commit -m "Upload new video: {shortcode} [skip ci]" || true')
                   os.system('git push')
 
-                  time.sleep(10)
+                  time.sleep(15)
 
                   query = f'mutation CreatePost {{ createPost(input: {{ text: "{clean_caption}", channelId: "{BUFFER_CHANNEL_ID}", schedulingType: automatic, mode: addToQueue, assets: {{ video: {{ url: "{public_url}" }} }} }}) {{ ... on PostActionSuccess {{ post {{ id }} }} ... on MutationError {{ message }} }} }}'
                   
@@ -129,7 +133,7 @@ jobs:
                                   
                           os.system(f'git add {TXT_FILE}')
                           os.system('git rm -f videos/*.mp4 >/dev/null 2>&1 || true')
-                          os.system(f'git commit -m "Remove: {shortcode} [skip ci]" || true')
+                          os.system(f'git commit -m "Remove processed link: {shortcode} [skip ci]" || true')
                           os.system('git push')
                       else:
                           raise Exception("Buffer error")
@@ -149,5 +153,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git rm -f videos/*.mp4 || true
-          git commit -m "Cleanup [skip ci]" || true
+          git commit -m "Final workflow cleanup [skip ci]" || true
           git push
