@@ -140,3 +140,18 @@ Jun245233
 21586507
 35073114
 61376245
+# Netscape HTTP Cookie File
+# http://curl.haxx.se/rfc/cookie_spec.html
+# This is a generated file!  Do not edit.
+
+.instagram.com	TRUE	/	TRUE	1795106570	ig_did	7BB43357-3F7D-4BF4-8B89-CB860EA8BD1E
+.instagram.com	TRUE	/	TRUE	1795106571	datr	C9kRasRKc_DtB-W-aaY3VLpP
+.instagram.com	TRUE	/	TRUE	1780665320	dpr	2.8125
+.instagram.com	TRUE	/	TRUE	1795106574	mid	ahHZCwABAAFmbcT9fXFCYYVy-uqJ
+.instagram.com	TRUE	/	TRUE	1795611953	ps_l	1
+.instagram.com	TRUE	/	TRUE	1795611953	ps_n	1
+.instagram.com	TRUE	/	TRUE	1787836534	ds_user_id	64888505096
+.instagram.com	TRUE	/	TRUE	1795612534	csrftoken	LeymS3lhGN4frkCKx19sZZ1Wj5vIbfUg
+.instagram.com	TRUE	/	TRUE	1795612515	sessionid	64888505096%3Am3uE9sVtWDg0pg%3A2%3AAYid06puxTteEvakUi8wfFJyIMLK2xZrdS6zRuB_BA
+.instagram.com	TRUE	/	TRUE	1780665330	wd	384x735
+.instagram.com	TRUE	/	TRUE	0	rur	"FRC\05464888505096\0541811596534:01ffdc47413fc158bc65bfb32a69f4ab33ef5c24aed1374717a1c8b84fcf6c2acaca1207"
