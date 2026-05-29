@@ -23,7 +23,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install Dependencies
-        run: pip install instaloader requests
+        run: pip install --upgrade instaloader requests
 
       - name: Process up to 10 Reels Sequentially From File
         id: process_step
@@ -66,7 +66,10 @@ jobs:
           if IG_SESSIONID and IG_CSRFTOKEN:
               L.context._session.cookies.set("sessionid", IG_SESSIONID, domain=".instagram.com")
               L.context._session.cookies.set("csrftoken", IG_CSRFTOKEN, domain=".instagram.com")
-              L.context._session.headers.update({"X-CSRFToken": IG_CSRFTOKEN})
+              L.context._session.headers.update({
+                  "X-CSRFToken": IG_CSRFTOKEN,
+                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+              })
 
           successful_count = 0
 
@@ -78,9 +81,6 @@ jobs:
                   break
                   
               url = current_lines[0]
-              
-              if i > 0:
-                  time.sleep(40)
               
               try:
                   shortcode = url.split("/reel/")[1].split("/")[0] if "/reel/" in url else url.split("/p/")[1].split("/")[0]
@@ -100,7 +100,18 @@ jobs:
                   if not post.is_video:
                       raise Exception("Not a video")
 
-                  L.download_post(post, target="./videos")
+                  try:
+                      L.download_post(post, target="./videos")
+                  except Exception as download_err:
+                      print(f"Skipping corrupt CDN URL: {download_err}")
+                      remaining_lines = current_lines[1:]
+                      with open(TXT_FILE, "w", encoding="utf-8") as f:
+                          for line in remaining_lines:
+                              f.write(line + "\n")
+                      os.system(f'git add {TXT_FILE}')
+                      os.system('git commit -m "Skip unresolvable link [skip ci]" || true')
+                      os.system('git push')
+                      continue
                   
                   video_files = glob.glob("./videos/*.mp4")
                   if not video_files:
@@ -150,7 +161,8 @@ jobs:
                       raise Exception("HTTP Error")
 
               except Exception as e:
-                  sys.exit(1)
+                  print(f"General error: {e}")
+                  continue
 
           PYTHON_SCRIPT
         env:
