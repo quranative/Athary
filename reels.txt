@@ -31,3 +31,4 @@ if (newLink && regex.test(newLink)) {
 } else {
     exit();
 }
+https://www.instagram.com/reel/*/?igsh=*==
