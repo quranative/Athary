@@ -35,3 +35,4 @@ try:
     print(ai_response.json().get("response", "").strip())
 except requests.exceptions.RequestException as e:
     print(f"Error connecting to Ollama: {e}")
+/storage/emulated/0/olama.py
