@@ -32,7 +32,7 @@ jobs:
           import os
           import sys
           import requests
-          import urllib.parse
+          import instaloader
           import time
 
           TXT_FILE = "reels.txt"
@@ -40,6 +40,7 @@ jobs:
           BUFFER_CHANNEL_ID = "6a11e7f5090476fb99512e90"
           
           IG_SESSIONID = os.getenv('IG_SESSIONID')
+          IG_CSRFTOKEN = os.getenv('IG_CSRFTOKEN')
 
           if not os.path.exists(TXT_FILE) or os.stat(TXT_FILE).st_size == 0:
               sys.exit(0)
@@ -50,8 +51,23 @@ jobs:
           if not all_links:
               sys.exit(0)
 
+          L = instaloader.Instaloader(
+              download_pictures=False, download_videos=False, 
+              download_video_thumbnails=False, download_comments=False, 
+              save_metadata=False
+          )
+
+          if IG_SESSIONID:
+              L.context._session.cookies.set("sessionid", IG_SESSIONID, domain=".instagram.com")
+          if IG_CSRFTOKEN:
+              L.context._session.cookies.set("csrftoken", IG_CSRFTOKEN, domain=".instagram.com")
+              L.context._session.headers.update({"X-CSRFToken": IG_CSRFTOKEN})
+          
+          L.context._session.headers.update({
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          })
+
           total_to_process = min(10, len(all_links))
-          successful_count = 0
 
           for i in range(total_to_process):
               with open(TXT_FILE, "r", encoding="utf-8") as f:
@@ -65,27 +81,15 @@ jobs:
               try:
                   shortcode = url.split("/reel/")[1].split("/")[0] if "/reel/" in url else url.split("/p/")[1].split("/")[0]
                   
-                  api_url = f"https://www.instagram.com/p/{shortcode}/?__a=1&__d=dis"
-                  headers = {
-                      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                      "Cookie": f"sessionid={IG_SESSIONID}" if IG_SESSIONID else ""
-                  }
+                  post = instaloader.Post.from_shortcode(L.context, shortcode)
+                  if not post.is_video:
+                      raise Exception("Not a video")
+                      
+                  direct_video_url = post.video_url
+                  if not direct_video_url:
+                      raise Exception("Could not extract video URL")
                   
-                  response = requests.get(api_url, headers=headers)
-                  if response.status_code != 200:
-                      raise Exception("Failed to fetch Instagram API")
-                      
-                  data = response.json()
-                  if "items" not in data or not data["items"]:
-                      raise Exception("No items found in response")
-                      
-                  item = data["items"][0]
-                  if "video_versions" not in item or not item["video_versions"]:
-                      raise Exception("No video versions available")
-                      
-                  direct_video_url = item["video_versions"][0]["url"]
-                  
-                  caption = item.get("caption", {}).get("text", "Video")
+                  caption = post.caption if post.caption else "Video"
                   clean_caption = caption.replace('"', '\\"').replace('\n', ' ')
 
                   query = f'mutation CreatePost {{ createPost(input: {{ text: "{clean_caption}", channelId: "{BUFFER_CHANNEL_ID}", schedulingType: automatic, mode: addToQueue, assets: {{ video: {{ url: "{direct_video_url}" }} }} }}) {{ ... on PostActionSuccess {{ post {{ id }} }} ... on MutationError {{ message }} }} }}'
@@ -100,7 +104,6 @@ jobs:
                   if buf_resp.status_code == 200 and "data" in buf_data:
                       create_post_data = buf_data["data"]["createPost"]
                       if create_post_data and "post" in create_post_data and create_post_data["post"]:
-                          successful_count += 1
                           
                           remaining_lines = current_lines[1:]
                           with open(TXT_FILE, "w", encoding="utf-8") as f:
@@ -133,3 +136,4 @@ jobs:
           PYTHON_SCRIPT
         env:
           IG_SESSIONID: ${{ secrets.INSTAGRAM_SESSIONID }}
+          IG_CSRFTOKEN: ${{ secrets.INSTAGRAM_CSRFTOKEN }}
