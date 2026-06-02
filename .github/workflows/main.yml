@@ -23,7 +23,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install Dependencies
-        run: pip install --upgrade requests instaloader
+        run: pip install --upgrade requests
 
       - name: Process up to 10 Reels Sequentially From File
         id: process_step
@@ -32,15 +32,11 @@ jobs:
           import os
           import sys
           import requests
-          import instaloader
           import time
 
           TXT_FILE = "reels.txt"
           BUFFER_TOKEN = "MnPkbBRZulID113ZBbcU1FaOSRRKckgvUJAKT3uqMfg"
           BUFFER_CHANNEL_ID = "6a11e7f5090476fb99512e90"
-          
-          IG_SESSIONID = os.getenv('IG_SESSIONID')
-          IG_CSRFTOKEN = os.getenv('IG_CSRFTOKEN')
 
           if not os.path.exists(TXT_FILE) or os.stat(TXT_FILE).st_size == 0:
               sys.exit(0)
@@ -50,22 +46,6 @@ jobs:
 
           if not all_links:
               sys.exit(0)
-
-          L = instaloader.Instaloader(
-              download_pictures=False, download_videos=False, 
-              download_video_thumbnails=False, download_comments=False, 
-              save_metadata=False
-          )
-
-          if IG_SESSIONID:
-              L.context._session.cookies.set("sessionid", IG_SESSIONID, domain=".instagram.com")
-          if IG_CSRFTOKEN:
-              L.context._session.cookies.set("csrftoken", IG_CSRFTOKEN, domain=".instagram.com")
-              L.context._session.headers.update({"X-CSRFToken": IG_CSRFTOKEN})
-          
-          L.context._session.headers.update({
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-          })
 
           total_to_process = min(10, len(all_links))
 
@@ -79,17 +59,24 @@ jobs:
               url = current_lines[0]
               
               try:
-                  shortcode = url.split("/reel/")[1].split("/")[0] if "/reel/" in url else url.split("/p/")[1].split("/")[0]
+                  # استخدام سيرفر وسيط خارجي لتخطي حظر IP خوادم GitHub
+                  api_endpoint = f"https://api.scraptik.com/v1/instagram/downloader?url={url}"
                   
-                  post = instaloader.Post.from_shortcode(L.context, shortcode)
-                  if not post.is_video:
-                      raise Exception("Not a video")
+                  response = requests.get(api_endpoint, timeout=20)
+                  if response.status_code != 200:
+                      raise Exception("API Downloader endpoint failed")
                       
-                  direct_video_url = post.video_url
-                  if not direct_video_url:
-                      raise Exception("Could not extract video URL")
+                  res_data = response.json()
+                  if not res_data.get("status") or "data" not in res_data:
+                      raise Exception("Invalid API Response")
+                      
+                  media_info = res_data["data"]
+                  direct_video_url = media_info.get("video_url")
                   
-                  caption = post.caption if post.caption else "Video"
+                  if not direct_video_url:
+                      raise Exception("No video URL generated from API")
+                  
+                  caption = media_info.get("caption", "Video")
                   clean_caption = caption.replace('"', '\\"').replace('\n', ' ')
 
                   query = f'mutation CreatePost {{ createPost(input: {{ text: "{clean_caption}", channelId: "{BUFFER_CHANNEL_ID}", schedulingType: automatic, mode: addToQueue, assets: {{ video: {{ url: "{direct_video_url}" }} }} }}) {{ ... on PostActionSuccess {{ post {{ id }} }} ... on MutationError {{ message }} }} }}'
@@ -113,12 +100,12 @@ jobs:
                           os.system('git config --global user.name "github-actions[bot]"')
                           os.system('git config --global user.email "github-actions[bot]@users.noreply.github.com"')
                           os.system(f'git add {TXT_FILE}')
-                          os.system(f'git commit -m "Remove processed link: {shortcode} [skip ci]" || true')
+                          os.system(f'git commit -m "Remove processed link [skip ci]" || true')
                           os.system('git push')
                       else:
-                          raise Exception("Buffer error")
+                          raise Exception("Buffer API error")
                   else:
-                      raise Exception("HTTP Error")
+                      raise Exception("Buffer HTTP Error")
 
               except Exception as e:
                   print(f"General error: {e}")
@@ -134,6 +121,3 @@ jobs:
                   continue
 
           PYTHON_SCRIPT
-        env:
-          IG_SESSIONID: ${{ secrets.INSTAGRAM_SESSIONID }}
-          IG_CSRFTOKEN: ${{ secrets.INSTAGRAM_CSRFTOKEN }}
