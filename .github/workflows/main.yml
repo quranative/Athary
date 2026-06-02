@@ -28,11 +28,12 @@ jobs:
       - name: Process up to 10 Reels Sequentially From File
         id: process_step
         run: |
-          python << 'PYTHON_SCRIPT'
+          python -u << 'PYTHON_SCRIPT'
           import os
           import sys
           import instaloader
           import requests
+          import traceback
           import time
 
           TXT_FILE = "reels.txt"
@@ -43,15 +44,17 @@ jobs:
           IG_CSRFTOKEN = os.getenv('IG_CSRFTOKEN')
 
           if not os.path.exists(TXT_FILE) or os.stat(TXT_FILE).st_size == 0:
+              print("الملف فارغ أو غير موجود.")
               sys.exit(0)
 
           with open(TXT_FILE, "r", encoding="utf-8") as f:
               all_links = [line.strip() for line in f.readlines() if line.strip()]
 
           if not all_links:
+              print("لا توجد روابط في الملف.")
               sys.exit(0)
 
-          total_to_process = min(10, len(all_links))
+          print(f"تم العثور على {len(all_links)} روابط. جاري بدء المعالجة...")
           
           L = instaloader.Instaloader(
               download_pictures=False, download_videos=False, 
@@ -59,15 +62,17 @@ jobs:
               save_metadata=False
           )
 
-          if IG_SESSIONID and IG_CSRFTOKEN:
+          if IG_SESSIONID:
               L.context._session.cookies.set("sessionid", IG_SESSIONID, domain=".instagram.com")
+          if IG_CSRFTOKEN:
               L.context._session.cookies.set("csrftoken", IG_CSRFTOKEN, domain=".instagram.com")
-              L.context._session.headers.update({
-                  "X-CSRFToken": IG_CSRFTOKEN,
-                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-              })
+              L.context._session.headers.update({"X-CSRFToken": IG_CSRFTOKEN})
+              
+          L.context._session.headers.update({
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          })
 
-          successful_count = 0
+          total_to_process = min(10, len(all_links))
 
           for i in range(total_to_process):
               with open(TXT_FILE, "r", encoding="utf-8") as f:
@@ -77,22 +82,27 @@ jobs:
                   break
                   
               url = current_lines[0]
+              print(f"\n--- جاري معالجة الرابط الحالي: {url} ---")
               
               try:
                   shortcode = url.split("/reel/")[1].split("/")[0] if "/reel/" in url else url.split("/p/")[1].split("/")[0]
+                  print(f"المعرف المستخرج: {shortcode}")
                   
+                  print("جاري جلب بيانات المقطع من إنستغرام...")
                   post = instaloader.Post.from_shortcode(L.context, shortcode)
                   if not post.is_video:
-                      raise Exception("Not a video")
+                      raise Exception("الرابط ليس لمقطع فيديو.")
 
-                  # استخراج رابط الفيديو المباشر الصالح للبث والنشر الخارجي
                   public_url = post.video_url
                   if not public_url:
-                      raise Exception("Direct video URL extraction failed")
+                      raise Exception("فشل استخراج رابط الفيديو المباشر من خوادم إنستغرام.")
+                      
+                  print(f"تم استخراج الرابط المباشر بنجاح.")
 
                   caption = post.caption if post.caption else "Video"
                   clean_caption = caption.replace('"', '\\"').replace('\n', ' ')
 
+                  print("جاري إرسال البيانات إلى Buffer...")
                   query = f'mutation CreatePost {{ createPost(input: {{ text: "{clean_caption}", channelId: "{BUFFER_CHANNEL_ID}", schedulingType: automatic, mode: addToQueue, assets: {{ video: {{ url: "{public_url}" }} }} }}) {{ ... on PostActionSuccess {{ post {{ id }} }} ... on MutationError {{ message }} }} }}'
                   
                   buf_resp = requests.post(
@@ -101,11 +111,13 @@ jobs:
                       headers={"Authorization": f"Bearer {BUFFER_TOKEN}", "Content-Type": "application/json"}
                   )
                   
+                  print(f"كود استجابة Buffer: {buf_resp.status_code}")
                   buf_data = buf_resp.json()
+                  
                   if buf_resp.status_code == 200 and "data" in buf_data:
                       create_post_data = buf_data["data"]["createPost"]
                       if create_post_data and "post" in create_post_data and create_post_data["post"]:
-                          successful_count += 1
+                          print("تمت الجدولة بنجاح في Buffer!")
                           
                           remaining_lines = current_lines[1:]
                           with open(TXT_FILE, "w", encoding="utf-8") as f:
@@ -118,12 +130,15 @@ jobs:
                           os.system(f'git commit -m "Remove processed link: {shortcode} [skip ci]" || true')
                           os.system('git push')
                       else:
-                          raise Exception("Buffer error")
+                          error_msg = create_post_data.get("message", "خطأ غير معروف من Buffer") if create_post_data else "رد غير متوقع"
+                          raise Exception(f"خطأ في Buffer API: {error_msg}")
                   else:
-                      raise Exception("HTTP Error")
+                      raise Exception(f"فشل الاتصال بـ Buffer، الرد: {buf_resp.text}")
 
               except Exception as e:
-                  print(f"General error: {e}")
+                  print(f"!!! حدث خطأ أثناء المعالجة !!!")
+                  traceback.print_exc()
+                  
                   remaining_lines = current_lines[1:]
                   with open(TXT_FILE, "w", encoding="utf-8") as f:
                       for line in remaining_lines:
