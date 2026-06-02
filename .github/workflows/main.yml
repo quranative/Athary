@@ -23,7 +23,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install Dependencies
-        run: pip install --upgrade instaloader requests
+        run: pip install --upgrade requests instaloader
 
       - name: Process up to 10 Reels Sequentially From File
         id: process_step
@@ -31,20 +31,15 @@ jobs:
           python << 'PYTHON_SCRIPT'
           import os
           import sys
-          import instaloader
-          import shutil
           import requests
           import urllib.parse
           import time
-          import glob
 
           TXT_FILE = "reels.txt"
           BUFFER_TOKEN = "MnPkbBRZulID113ZBbcU1FaOSRRKckgvUJAKT3uqMfg"
           BUFFER_CHANNEL_ID = "6a11e7f5090476fb99512e90"
-          GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY')
           
           IG_SESSIONID = os.getenv('IG_SESSIONID')
-          IG_CSRFTOKEN = os.getenv('IG_CSRFTOKEN')
 
           if not os.path.exists(TXT_FILE) or os.stat(TXT_FILE).st_size == 0:
               sys.exit(0)
@@ -56,21 +51,6 @@ jobs:
               sys.exit(0)
 
           total_to_process = min(10, len(all_links))
-          
-          L = instaloader.Instaloader(
-              download_pictures=False, download_videos=True, 
-              download_video_thumbnails=False, download_comments=False, 
-              save_metadata=False, dirname_pattern="./videos"
-          )
-
-          if IG_SESSIONID and IG_CSRFTOKEN:
-              L.context._session.cookies.set("sessionid", IG_SESSIONID, domain=".instagram.com")
-              L.context._session.cookies.set("csrftoken", IG_CSRFTOKEN, domain=".instagram.com")
-              L.context._session.headers.update({
-                  "X-CSRFToken": IG_CSRFTOKEN,
-                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-              })
-
           successful_count = 0
 
           for i in range(total_to_process):
@@ -85,54 +65,30 @@ jobs:
               try:
                   shortcode = url.split("/reel/")[1].split("/")[0] if "/reel/" in url else url.split("/p/")[1].split("/")[0]
                   
-                  os.system('git config --global user.name "github-actions[bot]"')
-                  os.system('git config --global user.email "github-actions[bot]@users.noreply.github.com"')
+                  api_url = f"https://www.instagram.com/p/{shortcode}/?__a=1&__d=dis"
+                  headers = {
+                      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                      "Cookie": f"sessionid={IG_SESSIONID}" if IG_SESSIONID else ""
+                  }
                   
-                  if os.path.exists("./videos"): 
-                      shutil.rmtree("./videos")
-                  os.makedirs("./videos", exist_ok=True)
-                  
-                  os.system('git rm -f videos/*.mp4 >/dev/null 2>&1 || true')
-                  os.system('git commit -m "Clean previous video cache [skip ci]" || true')
-                  os.system('git push || true')
-                  
-                  post = instaloader.Post.from_shortcode(L.context, shortcode)
-                  if not post.is_video:
-                      raise Exception("Not a video")
-
-                  try:
-                      L.download_post(post, target="./videos")
-                  except Exception as download_err:
-                      print(f"Skipping corrupt CDN URL: {download_err}")
-                      remaining_lines = current_lines[1:]
-                      with open(TXT_FILE, "w", encoding="utf-8") as f:
-                          for line in remaining_lines:
-                              f.write(line + "\n")
-                      os.system(f'git add {TXT_FILE}')
-                      os.system('git commit -m "Skip unresolvable link [skip ci]" || true')
-                      os.system('git push')
-                      continue
-                  
-                  video_files = glob.glob("./videos/*.mp4")
-                  if not video_files:
-                      raise Exception("Download failed")
+                  response = requests.get(api_url, headers=headers)
+                  if response.status_code != 200:
+                      raise Exception("Failed to fetch Instagram API")
                       
-                  target_video = video_files[0]
-                  actual_filename = os.path.basename(target_video)
-
-                  caption = post.caption if post.caption else "Video"
+                  data = response.json()
+                  if "items" not in data or not data["items"]:
+                      raise Exception("No items found in response")
+                      
+                  item = data["items"][0]
+                  if "video_versions" not in item or not item["video_versions"]:
+                      raise Exception("No video versions available")
+                      
+                  direct_video_url = item["video_versions"][0]["url"]
+                  
+                  caption = item.get("caption", {}).get("text", "Video")
                   clean_caption = caption.replace('"', '\\"').replace('\n', ' ')
 
-                  encoded_filename = urllib.parse.quote(actual_filename)
-                  public_url = f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/main/videos/{encoded_filename}"
-                  
-                  os.system(f'git add "{target_video}"')
-                  os.system(f'git commit -m "Upload new video: {shortcode} [skip ci]" || true')
-                  os.system('git push')
-
-                  time.sleep(15)
-
-                  query = f'mutation CreatePost {{ createPost(input: {{ text: "{clean_caption}", channelId: "{BUFFER_CHANNEL_ID}", schedulingType: automatic, mode: addToQueue, assets: {{ video: {{ url: "{public_url}" }} }} }}) {{ ... on PostActionSuccess {{ post {{ id }} }} ... on MutationError {{ message }} }} }}'
+                  query = f'mutation CreatePost {{ createPost(input: {{ text: "{clean_caption}", channelId: "{BUFFER_CHANNEL_ID}", schedulingType: automatic, mode: addToQueue, assets: {{ video: {{ url: "{direct_video_url}" }} }} }}) {{ ... on PostActionSuccess {{ post {{ id }} }} ... on MutationError {{ message }} }} }}'
                   
                   buf_resp = requests.post(
                       "https://api.buffer.com/v1/graphql",
@@ -151,8 +107,9 @@ jobs:
                               for line in remaining_lines:
                                   f.write(line + "\n")
                                   
+                          os.system('git config --global user.name "github-actions[bot]"')
+                          os.system('git config --global user.email "github-actions[bot]@users.noreply.github.com"')
                           os.system(f'git add {TXT_FILE}')
-                          os.system('git rm -f videos/*.mp4 >/dev/null 2>&1 || true')
                           os.system(f'git commit -m "Remove processed link: {shortcode} [skip ci]" || true')
                           os.system('git push')
                       else:
@@ -162,19 +119,17 @@ jobs:
 
               except Exception as e:
                   print(f"General error: {e}")
+                  remaining_lines = current_lines[1:]
+                  with open(TXT_FILE, "w", encoding="utf-8") as f:
+                      for line in remaining_lines:
+                          f.write(line + "\n")
+                  os.system('git config --global user.name "github-actions[bot]"')
+                  os.system('git config --global user.email "github-actions[bot]@users.noreply.github.com"')
+                  os.system(f'git add {TXT_FILE}')
+                  os.system('git commit -m "Skip unresolvable link [skip ci]" || true')
+                  os.system('git push')
                   continue
 
           PYTHON_SCRIPT
         env:
-          GITHUB_REPOSITORY: ${{ github.repository }}
           IG_SESSIONID: ${{ secrets.INSTAGRAM_SESSIONID }}
-          IG_CSRFTOKEN: ${{ secrets.INSTAGRAM_CSRFTOKEN }}
-
-      - name: Final Clean
-        if: always()
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git rm -f videos/*.mp4 || true
-          git commit -m "Final workflow cleanup [skip ci]" || true
-          git push
